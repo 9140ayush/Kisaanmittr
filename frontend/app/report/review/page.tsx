@@ -77,10 +77,24 @@ export default function AIReviewPage() {
       const result = await compileReport({ sections: reportData })
 
       if (result.success && result.downloadUrl) {
-        // Download PDF from base64 data URL
         try {
-          // If downloadUrl is a data URL, extract base64 and create blob
-          if (result.downloadUrl.startsWith("data:application/pdf;base64,")) {
+          // Use blob if available (new direct PDF response), otherwise use downloadUrl
+          const blob = result.blob || (result.downloadUrl.startsWith("blob:") 
+            ? await fetch(result.downloadUrl).then(r => r.blob())
+            : null)
+
+          if (blob) {
+            // Download PDF from blob (preferred method)
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement("a")
+            link.href = url
+            link.download = `kisaanmittr-report-${new Date().toISOString().split("T")[0]}.pdf`
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            URL.revokeObjectURL(url)
+          } else if (result.downloadUrl.startsWith("data:application/pdf;base64,")) {
+            // Fallback: Handle base64 data URL (legacy support)
             const base64 = result.downloadUrl.split(",")[1]
             const byteCharacters = atob(base64)
             const byteNumbers = new Array(byteCharacters.length)
@@ -88,18 +102,18 @@ export default function AIReviewPage() {
               byteNumbers[i] = byteCharacters.charCodeAt(i)
             }
             const byteArray = new Uint8Array(byteNumbers)
-            const blob = new Blob([byteArray], { type: "application/pdf" })
+            const pdfBlob = new Blob([byteArray], { type: "application/pdf" })
             
-            const url = window.URL.createObjectURL(blob)
+            const url = URL.createObjectURL(pdfBlob)
             const link = document.createElement("a")
             link.href = url
             link.download = `kisaanmittr-report-${new Date().toISOString().split("T")[0]}.pdf`
             document.body.appendChild(link)
             link.click()
             document.body.removeChild(link)
-            window.URL.revokeObjectURL(url)
+            URL.revokeObjectURL(url)
           } else {
-            // Fallback: try direct download
+            // Fallback: try direct download URL
             window.open(result.downloadUrl, "_blank")
           }
 
