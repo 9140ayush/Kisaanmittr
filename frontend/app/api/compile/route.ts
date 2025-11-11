@@ -17,6 +17,8 @@ export async function POST(request: NextRequest) {
       content: section.content || "",
     }))
 
+    console.log(`📄 Proxying PDF compilation request to backend (${backendSections.length} sections)`)
+
     // Proxy request to backend Express server
     const backendResponse = await fetch(`${BACKEND_URL}/api/compile`, {
       method: "POST",
@@ -30,40 +32,72 @@ export async function POST(request: NextRequest) {
     })
 
     if (!backendResponse.ok) {
+      // Backend returned an error (JSON response)
       const error = await backendResponse.json().catch(() => ({ error: "Backend request failed" }))
+      console.error("❌ Backend compilation error:", error)
       return NextResponse.json(
-        { error: error.error || "Failed to compile report" },
+        { 
+          success: false,
+          error: error.error || "Failed to compile report",
+          details: error.details || error.message,
+        },
         { status: backendResponse.status || 500 },
       )
     }
 
-    const backendData = await backendResponse.json()
+    // Check if response is PDF (backend returns PDF directly)
+    const contentType = backendResponse.headers.get("content-type")
+    if (contentType?.includes("application/pdf")) {
+      // Backend returned PDF binary data
+      const pdfBuffer = await backendResponse.arrayBuffer()
+      const filename = backendResponse.headers.get("content-disposition")?.match(/filename="?(.+)"?/)?.[1] || "kisaanmittr-report.pdf"
 
-    // Backend returns base64 PDF, create a data URL for download
-    const pdfBase64 = backendData.pdf
-    if (!pdfBase64) {
-      return NextResponse.json(
-        { error: "No PDF data received from backend" },
-        { status: 500 },
-      )
+      console.log(`✅ PDF received from backend (${pdfBuffer.byteLength} bytes)`)
+
+      // Return PDF as binary response with proper headers
+      return new NextResponse(pdfBuffer, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Length": pdfBuffer.byteLength.toString(),
+          "Cache-Control": "no-cache",
+        },
+      })
+    } else {
+      // Fallback: backend returned JSON (legacy support)
+      const backendData = await backendResponse.json()
+      const pdfBase64 = backendData.pdf
+      
+      if (!pdfBase64) {
+        return NextResponse.json(
+          { 
+            success: false,
+            error: "No PDF data received from backend" 
+          },
+          { status: 500 },
+        )
+      }
+
+      // Convert base64 to buffer for download
+      const pdfBuffer = Buffer.from(pdfBase64, "base64")
+      return new NextResponse(pdfBuffer, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="kisaanmittr-report.pdf"`,
+          "Content-Length": pdfBuffer.length.toString(),
+          "Cache-Control": "no-cache",
+        },
+      })
     }
-
-    // Return success with base64 PDF data
-    // Frontend will handle the download using this data
-    return NextResponse.json(
-      {
-        success: true,
-        message: backendData.message || "Report compiled successfully",
-        pdfBase64: pdfBase64,
-        downloadUrl: `data:application/pdf;base64,${pdfBase64}`, // Data URL for direct download
-        timestamp: new Date().toISOString(),
-      },
-      { status: 200 },
-    )
   } catch (error: any) {
-    console.error("Compilation error:", error)
+    console.error("❌ Compilation error:", error)
     return NextResponse.json(
-      { error: error.message || "Failed to compile report" },
+      { 
+        success: false,
+        error: error.message || "Failed to compile report" 
+      },
       { status: 500 },
     )
   }

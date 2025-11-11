@@ -120,6 +120,16 @@ app.use((err, req, res, next) => {
 app.listen(PORT, async () => {
   console.log(`🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`📡 CORS enabled for: http://localhost:3000`);
+  
+  // Check OpenAI API key configuration
+  if (process.env.OPENAI_API_KEY) {
+    const apiKeyPreview = process.env.OPENAI_API_KEY.substring(0, 7) + '...';
+    console.log(`✅ OpenAI API key is configured (${apiKeyPreview})`);
+  } else {
+    console.warn('⚠️  OPENAI_API_KEY is not set in environment variables');
+    console.warn('   The /api/generate endpoint will not work without an API key');
+  }
+  
   await testSupabaseConnection();
 });
 
