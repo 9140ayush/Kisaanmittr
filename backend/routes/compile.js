@@ -7,9 +7,28 @@ router.post('/', async (req, res) => {
   try {
     const { sections, userId } = req.body;
 
+    console.log('📄 PDF compilation request received');
+    console.log(`   Sections count: ${sections?.length || 0}`);
+
     if (!sections || !Array.isArray(sections) || sections.length === 0) {
+      console.error('❌ Invalid request: sections array is required');
       return res.status(400).json({
+        success: false,
         error: 'Sections array is required',
+        details: 'Please provide at least one section with name and content',
+      });
+    }
+
+    // Validate sections have required fields
+    const invalidSections = sections.filter(
+      (section) => !section.name || typeof section.content !== 'string'
+    );
+    if (invalidSections.length > 0) {
+      console.error('❌ Invalid sections found:', invalidSections.length);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid sections',
+        details: 'Each section must have a name and content field',
       });
     }
 
@@ -79,7 +98,8 @@ router.post('/', async (req, res) => {
     });
 
     // Add sections
-    sections.forEach((section, index) => {
+    for (let index = 0; index < sections.length; index++) {
+      const section = sections[index];
       page = pdfDoc.addPage([pageWidth, pageHeight]);
       yPosition = pageHeight - margin;
 
@@ -96,14 +116,83 @@ router.post('/', async (req, res) => {
 
       // Section content
       const content = section.content || '';
-      const words = content.split(' ');
+      
+      // Handle empty content
+      if (!content || content.trim().length === 0) {
+        if (yPosition < 100) {
+          page = pdfDoc.addPage([pageWidth, pageHeight]);
+          yPosition = pageHeight - margin;
+        }
+        page.drawText('(No content provided)', {
+          x: margin,
+          y: yPosition,
+          size: 11,
+          font: font,
+          color: rgb(0.5, 0.5, 0.5), // Gray color for empty content
+        });
+        yPosition -= lineHeight;
+        continue; // Skip to next section
+      }
+
+      // Split content into words and handle line wrapping
+      const words = content.split(/\s+/).filter(word => word.length > 0);
       let currentLine = '';
 
       words.forEach((word) => {
+        // Handle newlines in content
+        if (word.includes('\n')) {
+          const lines = word.split('\n');
+          lines.forEach((line, lineIndex) => {
+            if (lineIndex === 0) {
+              // First part of the word
+              const testLine = currentLine + (currentLine ? ' ' : '') + line;
+              const textWidth = font.widthOfTextAtSize(testLine, 11);
+              
+              if (textWidth > pageWidth - 2 * margin && currentLine) {
+                // Draw current line and start new line
+                if (yPosition < 100) {
+                  page = pdfDoc.addPage([pageWidth, pageHeight]);
+                  yPosition = pageHeight - margin;
+                }
+                page.drawText(currentLine, {
+                  x: margin,
+                  y: yPosition,
+                  size: 11,
+                  font: font,
+                  color: rgb(0, 0, 0),
+                });
+                yPosition -= lineHeight;
+                currentLine = line;
+              } else {
+                currentLine = testLine;
+              }
+            } else {
+              // Subsequent lines (after newline)
+              if (currentLine) {
+                if (yPosition < 100) {
+                  page = pdfDoc.addPage([pageWidth, pageHeight]);
+                  yPosition = pageHeight - margin;
+                }
+                page.drawText(currentLine, {
+                  x: margin,
+                  y: yPosition,
+                  size: 11,
+                  font: font,
+                  color: rgb(0, 0, 0),
+                });
+                yPosition -= lineHeight;
+              }
+              currentLine = line;
+            }
+          });
+          return;
+        }
+
+        // Regular word wrapping
         const testLine = currentLine + (currentLine ? ' ' : '') + word;
         const textWidth = font.widthOfTextAtSize(testLine, 11);
 
-        if (textWidth > pageWidth - 2 * margin || word.includes('\n')) {
+        if (textWidth > pageWidth - 2 * margin) {
           if (currentLine) {
             if (yPosition < 100) {
               page = pdfDoc.addPage([pageWidth, pageHeight]);
@@ -117,8 +206,8 @@ router.post('/', async (req, res) => {
               color: rgb(0, 0, 0),
             });
             yPosition -= lineHeight;
-            currentLine = word.replace('\n', '');
           }
+          currentLine = word;
         } else {
           currentLine = testLine;
         }
@@ -137,8 +226,9 @@ router.post('/', async (req, res) => {
           font: font,
           color: rgb(0, 0, 0),
         });
+        yPosition -= lineHeight;
       }
-    });
+    }
 
     // Add page numbers
     const pages = pdfDoc.getPages();
@@ -155,21 +245,36 @@ router.post('/', async (req, res) => {
     });
 
     // Generate PDF bytes
+    console.log('🔄 Generating PDF bytes...');
     const pdfBytes = await pdfDoc.save();
+    console.log(`✅ PDF generated successfully (${pdfBytes.length} bytes)`);
 
-    // Convert to base64 for response
-    const base64Pdf = Buffer.from(pdfBytes).toString('base64');
+    // Generate filename with timestamp
+    const timestamp = new Date().toISOString().split('T')[0];
+    const filename = `kisaanmittr-report-${timestamp}.pdf`;
 
-    res.json({
-      success: true,
-      pdf: base64Pdf,
-      message: 'PDF compiled successfully',
-    });
+    // Set response headers for PDF download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBytes.length.toString());
+    res.setHeader('Cache-Control', 'no-cache');
+
+    // Send PDF as binary response
+    console.log(`📤 Sending PDF response: ${filename} (${pdfBytes.length} bytes)`);
+    res.send(Buffer.from(pdfBytes));
   } catch (error) {
-    console.error('PDF compilation error:', error);
+    // Enhanced error logging
+    console.error('❌ PDF compilation error:', {
+      message: error.message,
+      type: error.constructor.name,
+      stack: error.stack,
+    });
+
+    // Return JSON error response (not PDF)
     res.status(500).json({
+      success: false,
       error: 'Failed to compile PDF',
-      details: error.message,
+      details: error.message || 'An unexpected error occurred during PDF generation',
     });
   }
 });
