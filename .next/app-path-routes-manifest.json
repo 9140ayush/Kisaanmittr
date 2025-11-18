@@ -1,0 +1,12 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/compile/route": "/api/compile",
+  "/api/extract/route": "/api/extract",
+  "/api/generate/route": "/api/generate",
+  "/api/saveDraft/route": "/api/saveDraft",
+  "/page": "/",
+  "/report/content/page": "/report/content",
+  "/report/page": "/report",
+  "/report/review/page": "/report/review"
+}
